@@ -10,8 +10,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     
-    <!-- Firebase SDKs -->
+    <!-- --- PASO 1 Y 2: ACTUALIZACIÓN DEL PUENTE DE FIREBASE --- -->
     <script type="module">
+        // Importamos getDocs (necesario para ver todos los registros antes de borrarlos)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -30,7 +31,7 @@
         const db = getFirestore(app);
         const appId = 'crucianelli-scm-planner';
 
-        // Añadido getDocs para permitir borrado masivo
+        // Actualizamos el objeto window.FB agregando getDocs
         window.FB = { db, auth, appId, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch, signInAnonymously, onAuthStateChanged };
     </script>
 
@@ -109,7 +110,6 @@
                         onAuthStateChanged(auth, (u) => {
                             if (u) {
                                 setUser(u);
-                                // Listeners Firestore Realtime
                                 onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'master')), (s) => setMasterItems(s.docs.map(d => d.data())), (e) => console.error(e));
                                 onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'cuotas')), (s) => {
                                     const c = {}; s.docs.forEach(d => c[d.id] = d.data().list || []); setCuotasArrangement(c);
@@ -143,11 +143,11 @@
                     const stock = stockData[skuKey] || 0;
                     const oc = ocPendientes[skuKey] || 0;
                     const totalDisp = stock + oc;
-                    const comprar = totalDisp < item.puntoPedido;
+                    const comprar = totalDisp < (item.puntoPedido || 0);
                     
                     let cantTotalAReponer = 0;
                     if (comprar) {
-                        const faltante = item.puntoPedido - totalDisp;
+                        const faltante = (item.puntoPedido || 0) - totalDisp;
                         cantTotalAReponer = item.lote > 0 ? Math.ceil(faltante / item.lote) * item.lote : faltante;
                     }
 
@@ -225,7 +225,7 @@
                 const ws = XLSX.utils.json_to_sheet(target.map(i => ({
                     'COD ART.': i.codArt, 'DESCRIPCION': i.descripcion, 'CANT. A PEDIR': i.cantidadSugerida,
                     'STOCK': i.stock, 'OC PEND.': i.oc, 'PTO PEDIDO': i.puntoPedido, 'PROVEEDOR': i.proveedor, 
-                    'CONTRATO': i.contrato, 'POS.': i.posicion, 'FECHA SUG.': i.fechaSug
+                    'CONTRATO': i.contrato, 'POSICION': i.posicion, 'FECHA SUG.': i.fechaSug
                 })));
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Plan");
@@ -246,7 +246,8 @@
                 const reader = new FileReader();
                 reader.onload = async (evt) => {
                     try {
-                        const data = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, {type: 'binary'}).Sheets[XLSX.read(evt.target.result, {type: 'binary'}).SheetNames[0]]);
+                        const workbook = XLSX.read(evt.target.result, {type: 'binary'});
+                        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                         if (!window.FB || !user) return;
                         const { db, appId, doc, setDoc, writeBatch } = window.FB;
 
@@ -315,7 +316,7 @@
                 if (!window.FB || !user) return;
                 const { db, appId, collection, getDocs, writeBatch, doc } = window.FB;
                 
-                if (!confirm("¿Estás seguro de que deseas eliminar TODAS las cuotas de reparto de la nube? Esta acción no se puede deshacer.")) return;
+                if (!confirm("¿Deseas eliminar TODAS las cuotas de reparto? Esto no se puede deshacer.")) return;
 
                 try {
                     setIsLoading(true);
@@ -328,16 +329,16 @@
                     });
                     
                     await batch.commit();
-                    showToast("Todas las cuotas han sido eliminadas correctamente.");
+                    showToast("Todas las cuotas han sido eliminadas.");
                 } catch (e) {
                     console.error(e);
-                    showToast("Error al eliminar las cuotas.", "error");
+                    showToast("Error al eliminar cuotas.", "error");
                 } finally {
                     setIsLoading(false);
                 }
             };
 
-            if (authError) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-10 text-center"><div className="bg-red-500/10 p-10 rounded-3xl border border-red-500/30 max-w-lg"> <Icons.Alert size={64} className="mx-auto text-red-500 mb-6" /> <h2 className="text-2xl font-black uppercase mb-4 tracking-tighter">Error de Conexión Cloud</h2> <p className="text-slate-400 mb-8">{authError}</p> <button onClick={() => window.location.reload()} className="bg-white text-slate-900 px-10 py-4 rounded-2xl font-black uppercase text-xs">Reintentar</button> </div></div>;
+            if (authError) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-10 text-center"><div className="bg-red-500/10 p-10 rounded-3xl border border-red-500/30 max-w-lg shadow-2xl"> <Icons.Alert size={64} className="mx-auto text-red-500 mb-6" /> <h2 className="text-2xl font-black uppercase mb-4 tracking-tighter">Error de Configuración</h2> <p className="text-slate-400 mb-8">{authError}</p> <button onClick={() => window.location.reload()} className="bg-white text-slate-900 px-10 py-4 rounded-2xl font-black uppercase text-xs">Reintentar</button> </div></div>;
 
             if (isLoading) return <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white"><div className="loader mb-8"></div><p className="font-black uppercase tracking-[0.3em] text-xs animate-pulse">Sincronizando Crucianelli Cloud...</p></div>;
 
@@ -349,17 +350,17 @@
                         <div className="fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-200">
                                 <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
-                                    <div className="flex items-center gap-3"><div className="bg-amber-500 p-2 rounded-lg text-slate-900"><Icons.Alert /></div> <h3 className="font-black uppercase text-sm tracking-widest">Análisis de Faltantes</h3></div>
-                                    <button onClick={() => setShowNotifyModal(false)} className="hover:rotate-90 transition-transform"><Icons.Close /></button>
+                                    <div className="flex items-center gap-3"><div className="bg-amber-500 p-2 rounded-lg text-slate-900"><Icons.Alert /></div> <h3 className="font-black uppercase text-sm tracking-widest">Alertas de Contratos</h3></div>
+                                    <button onClick={() => setShowNotifyModal(false)}><Icons.Close /></button>
                                 </div>
                                 <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4 no-scrollbar">
                                     {Object.entries(missingContracts).map(([prov, items]) => (
                                         <div key={prov} className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex justify-between items-center hover:border-red-200 transition-colors">
-                                            <div className="flex-1"><h4 className="font-black text-red-600 uppercase text-xs mb-1">{prov}</h4><p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{items.length} ítems para revisar contrato/cuota</p></div>
-                                            <button onClick={() => sendEmailToBuyer(prov, items)} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-red-600 transition-all"><Icons.Mail /> Notificar Comprador</button>
+                                            <div className="flex-1"><h4 className="font-black text-red-600 uppercase text-xs mb-1">{prov}</h4><p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{items.length} ítems sin contrato marco</p></div>
+                                            <button onClick={() => sendEmailToBuyer(prov, items)} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-red-600 transition-all"><Icons.Mail /> Notificar</button>
                                         </div>
                                     ))}
-                                    {Object.keys(missingContracts).length === 0 && <p className="text-center p-10 text-slate-300 font-black uppercase">Todos los contratos están actualizados</p>}
+                                    {Object.keys(missingContracts).length === 0 && <p className="text-center p-10 text-slate-300 font-black uppercase">Todos los contratos están en regla</p>}
                                 </div>
                             </div>
                         </div>
@@ -405,7 +406,6 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    {calculatedData.length === 0 && <div className="p-40 text-center text-slate-200 font-black uppercase tracking-widest">Sincronizando Maestro de la Nube...</div>}
                                 </div>
                             </div>
                         )}
@@ -468,10 +468,7 @@
                                     <div key={h.id} className="bg-white p-8 rounded-[2.5rem] border-l-[15px] border-l-red-600 shadow-sm flex flex-col md:flex-row justify-between items-center gap-8 group hover:scale-[1.02] transition-all">
                                         <div className="text-center md:text-left"><p className="font-black text-slate-900 text-xl uppercase tracking-tighter">{h.fecha}</p><p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1 italic">{h.count} ítems en este plan de reposición</p></div>
                                         <button onClick={() => {
-                                            const ws = XLSX.utils.json_to_sheet(h.itemsData.map(i => ({
-                                                'COD ART.': i.codArt, 'DESCRIPCION': i.descripcion, 'CANT. A PEDIR': i.cantidadSugerida,
-                                                'PROVEEDOR': i.proveedor, 'CONTRATO': i.contrato, 'POSICION': i.posicion
-                                            })));
+                                            const ws = XLSX.utils.json_to_sheet(h.itemsData);
                                             const wb = XLSX.utils.book_new();
                                             XLSX.utils.book_append_sheet(wb, ws, "Plan Recuperado");
                                             XLSX.writeFile(wb, `Plan_Recuperado_${h.fecha.replace(/[/:\s]/g, '_')}.xlsx`);
