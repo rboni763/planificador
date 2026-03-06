@@ -14,7 +14,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5dWvn5mjbL6PVMW2-6rQM6T2yKDa1ATY",
@@ -30,7 +30,8 @@
         const db = getFirestore(app);
         const appId = 'crucianelli-scm-planner';
 
-        window.FB = { db, auth, appId, doc, setDoc, getDoc, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch, signInAnonymously, onAuthStateChanged };
+        // Añadido getDocs para permitir borrado masivo
+        window.FB = { db, auth, appId, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch, signInAnonymously, onAuthStateChanged };
     </script>
 
     <style>
@@ -310,6 +311,32 @@
                 e.target.value = null;
             };
 
+            const handleClearCuotas = async () => {
+                if (!window.FB || !user) return;
+                const { db, appId, collection, getDocs, writeBatch, doc } = window.FB;
+                
+                if (!confirm("¿Estás seguro de que deseas eliminar TODAS las cuotas de reparto de la nube? Esta acción no se puede deshacer.")) return;
+
+                try {
+                    setIsLoading(true);
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'cuotas'));
+                    const snap = await getDocs(q);
+                    const batch = writeBatch(db);
+                    
+                    snap.forEach((d) => {
+                        batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'cuotas', d.id));
+                    });
+                    
+                    await batch.commit();
+                    showToast("Todas las cuotas han sido eliminadas correctamente.");
+                } catch (e) {
+                    console.error(e);
+                    showToast("Error al eliminar las cuotas.", "error");
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
             if (authError) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-10 text-center"><div className="bg-red-500/10 p-10 rounded-3xl border border-red-500/30 max-w-lg"> <Icons.Alert size={64} className="mx-auto text-red-500 mb-6" /> <h2 className="text-2xl font-black uppercase mb-4 tracking-tighter">Error de Conexión Cloud</h2> <p className="text-slate-400 mb-8">{authError}</p> <button onClick={() => window.location.reload()} className="bg-white text-slate-900 px-10 py-4 rounded-2xl font-black uppercase text-xs">Reintentar</button> </div></div>;
 
             if (isLoading) return <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white"><div className="loader mb-8"></div><p className="font-black uppercase tracking-[0.3em] text-xs animate-pulse">Sincronizando Crucianelli Cloud...</p></div>;
@@ -422,7 +449,15 @@
                                 <ImportCard title="Stock Inicial" count={Object.keys(stockData).length} onFile={e => handleFileUpload(e, 'stock')} icon={Icons.Upload} description="Sesión temporal" />
                                 <ImportCard title="OC Pendientes" count={Object.keys(ocPendientes).length} onFile={e => handleFileUpload(e, 'oc')} icon={Icons.History} description="Sesión temporal" />
                                 <ImportCard title="Contratos Marco" count={Object.keys(contratosData).length} onFile={e => handleFileUpload(e, 'contrato')} icon={Icons.Cloud} description="Sesión temporal" />
-                                <ImportCard title="Cuotas Reparto" count={Object.keys(cuotasArrangement).length} onFile={e => handleFileUpload(e, 'cuota')} icon={Icons.Users} highlight description="Persistente Cloud" />
+                                <ImportCard 
+                                    title="Cuotas Reparto" 
+                                    count={Object.keys(cuotasArrangement).length} 
+                                    onFile={e => handleFileUpload(e, 'cuota')} 
+                                    icon={Icons.Users} 
+                                    highlight 
+                                    description="Persistente Cloud" 
+                                    onClear={handleClearCuotas}
+                                />
                             </div>
                         )}
 
@@ -456,13 +491,26 @@
             );
         }
 
-        const ImportCard = ({ title, count, onFile, icon: Icon, highlight, description }) => (
-            <div className={`bg-white p-10 rounded-[3.5rem] border shadow-sm text-center group hover:shadow-2xl transition-all relative overflow-hidden ${highlight ? 'border-red-100 bg-red-50/10' : 'border-slate-100'}`}>
+        const ImportCard = ({ title, count, onFile, icon: Icon, highlight, description, onClear }) => (
+            <div className={`bg-white p-10 rounded-[3.5rem] border shadow-sm text-center group hover:shadow-2xl transition-all relative overflow-hidden ${highlight ? 'border-red-200 bg-red-50/10' : 'border-slate-100'}`}>
                 <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-6 transition-all ${highlight ? 'bg-red-600 text-white shadow-xl shadow-red-200' : 'bg-slate-50 text-slate-300 group-hover:bg-slate-950 group-hover:text-white'}`}><Icon size={32} /></div>
                 <h3 className="font-black text-xs uppercase text-slate-900 mb-1 tracking-tight">{title}</h3>
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-6 italic">{description}</p>
                 <p className="text-4xl font-black mb-10 tracking-tighter">{count}</p>
-                <label className="bg-slate-950 text-white block py-4.5 rounded-[2rem] text-[10px] font-black uppercase cursor-pointer hover:bg-red-600 transition-all active:scale-95 tracking-widest shadow-lg">Subir Archivo<input type="file" className="hidden" onChange={onFile} /></label>
+                <div className="space-y-3">
+                    <label className="bg-slate-950 text-white block py-4.5 rounded-[2rem] text-[10px] font-black uppercase cursor-pointer hover:bg-emerald-600 transition-all active:scale-95 tracking-widest shadow-lg">
+                        Subir Archivo
+                        <input type="file" className="hidden" onChange={onFile} />
+                    </label>
+                    {onClear && (
+                        <button 
+                            onClick={onClear}
+                            className="w-full py-3 rounded-[2rem] text-[9px] font-black uppercase text-red-600 border-2 border-red-100 hover:bg-red-600 hover:text-white transition-all active:scale-95"
+                        >
+                            <span className="flex items-center justify-center gap-2"><Icons.Trash size={12} /> Eliminar Todo</span>
+                        </button>
+                    )}
+                </div>
             </div>
         );
 
