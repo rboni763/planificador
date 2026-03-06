@@ -10,9 +10,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     
-    <!-- --- PASO 1 Y 2: ACTUALIZACIÓN DEL PUENTE DE FIREBASE --- -->
     <script type="module">
-        // Importamos getDocs (necesario para ver todos los registros antes de borrarlos)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -31,7 +29,6 @@
         const db = getFirestore(app);
         const appId = 'crucianelli-scm-planner';
 
-        // Actualizamos el objeto window.FB agregando getDocs
         window.FB = { db, auth, appId, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, addDoc, deleteDoc, writeBatch, signInAnonymously, onAuthStateChanged };
     </script>
 
@@ -301,7 +298,16 @@
                                     groups[sku].push({ proveedor: superNormalize(row['PROVEEDOR']), cuota: Number(row['CUOTA']) || 0, proveedorOriginal: String(row['PROVEEDOR'] || '').trim() });
                                 }
                             });
-                            for (const sku in groups) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cuotas', sku), { list: groups[sku] });
+                            // Para cuotas masivas usamos chunks para evitar errores de batch
+                            const entries = Object.entries(groups);
+                            for (let i = 0; i < entries.length; i += 400) {
+                                const batch = writeBatch(db);
+                                const chunk = entries.slice(i, i + 400);
+                                chunk.forEach(([sku, list]) => {
+                                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'cuotas', sku), { list });
+                                });
+                                await batch.commit();
+                            }
                             showToast("Cuotas Cloud actualizadas.");
                         }
                     } catch (err) {
@@ -312,6 +318,7 @@
                 e.target.value = null;
             };
 
+            // SOLUCIÓN AL ERROR DE ELIMINACIÓN MASIVA (CHUNKED DELETE)
             const handleClearCuotas = async () => {
                 if (!window.FB || !user) return;
                 const { db, appId, collection, getDocs, writeBatch, doc } = window.FB;
@@ -322,17 +329,32 @@
                     setIsLoading(true);
                     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'cuotas'));
                     const snap = await getDocs(q);
-                    const batch = writeBatch(db);
                     
-                    snap.forEach((d) => {
-                        batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'cuotas', d.id));
-                    });
+                    if (snap.empty) {
+                        showToast("No hay cuotas para eliminar.");
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    const docs = snap.docs;
+                    const CHUNK_SIZE = 400; // Por debajo del límite de 500 de Firestore
+
+                    for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+                        const batch = writeBatch(db);
+                        const chunk = docs.slice(i, i + CHUNK_SIZE);
+                        
+                        chunk.forEach((d) => {
+                            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'cuotas', d.id));
+                        });
+                        
+                        await batch.commit();
+                        console.log(`Borrados ${Math.min(i + CHUNK_SIZE, docs.length)} de ${docs.length}`);
+                    }
                     
-                    await batch.commit();
                     showToast("Todas las cuotas han sido eliminadas.");
                 } catch (e) {
-                    console.error(e);
-                    showToast("Error al eliminar cuotas.", "error");
+                    console.error("Error al borrar:", e);
+                    showToast("Error al eliminar cuotas. Revisa la consola.", "error");
                 } finally {
                     setIsLoading(false);
                 }
@@ -340,7 +362,7 @@
 
             if (authError) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-10 text-center"><div className="bg-red-500/10 p-10 rounded-3xl border border-red-500/30 max-w-lg shadow-2xl"> <Icons.Alert size={64} className="mx-auto text-red-500 mb-6" /> <h2 className="text-2xl font-black uppercase mb-4 tracking-tighter">Error de Configuración</h2> <p className="text-slate-400 mb-8">{authError}</p> <button onClick={() => window.location.reload()} className="bg-white text-slate-900 px-10 py-4 rounded-2xl font-black uppercase text-xs">Reintentar</button> </div></div>;
 
-            if (isLoading) return <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white"><div className="loader mb-8"></div><p className="font-black uppercase tracking-[0.3em] text-xs animate-pulse">Sincronizando Crucianelli Cloud...</p></div>;
+            if (isLoading) return <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white"><div className="loader mb-8"></div><p className="font-black uppercase tracking-[0.3em] text-xs animate-pulse">Procesando en la Nube...</p></div>;
 
             return (
                 <div className="min-h-screen pb-20">
@@ -391,7 +413,7 @@
                                         <table className="w-full text-[10px] text-left border-collapse">
                                             <thead className="bg-slate-900 text-white font-black uppercase sticky top-0 z-10">
                                                 <tr>
-                                                    <th className="p-4">Cod Art.</th><th className="p-4">Descripción</th><th className="p-4 text-center">Stock</th><th className="p-4 text-center">OC Pend.</th><th className="p-4 text-center">Pto Pedido</th><th className="p-4 text-center">Lote</th><th className="p-4 text-center bg-orange-600">Cant. Pedir</th><th className="p-4 text-center">¿Comprar?</th><th className="p-4 text-center">Fecha Sug.</th><th className="p-4">Proveedor</th><th className="p-4">Contrato</th><th className="p-4 text-center">Pos.</th><th className="p-4 text-center">Cuota %</th>
+                                                    <th className="p-4">Cod Art..</th><th className="p-4">Descripción</th><th className="p-4 text-center">Stock</th><th className="p-4 text-center">OC Pend.</th><th className="p-4 text-center">Pto Pedido</th><th className="p-4 text-center">Lote</th><th className="p-4 text-center bg-orange-600">Cant. Pedir</th><th className="p-4 text-center">¿Comprar?</th><th className="p-4 text-center">Fecha Sug.</th><th className="p-4">Proveedor</th><th className="p-4">Contrato</th><th className="p-4 text-center">Pos.</th><th className="p-4 text-center">Cuota %</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y font-bold text-slate-700">
